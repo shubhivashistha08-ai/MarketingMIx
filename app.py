@@ -219,11 +219,10 @@ def main():
 
         with tab1:
             st.plotly_chart(plot_importance(imp), use_container_width=True)
-
         with tab2:
             contrib_df = pd.DataFrame({
-                "Channel": imp["Feature"],
-                "Contribution": imp["Coefficient"]
+                "Channel": features,
+                "Contribution": imp.set_index("Feature").loc[features, "Coefficient"].values
             })
             st.plotly_chart(
                 plot_contribution(filtered_df, model, scaler, imp["Feature"].tolist()),
