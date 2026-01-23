@@ -1,4 +1,4 @@
-import gradio as gr
+import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
@@ -20,12 +20,20 @@ DISTRIBUTION_VARS = ['Weighted_Distribution', 'Numeric_Distribution', 'TDP']
 PRICE_VARS = ['Net_Price', 'CPI']
 EXTERNAL_VARS = ['GDP_Growth', 'Festival_Index', 'Rainfall_Index']
 
+# Page config
+st.set_page_config(
+    page_title="Marketing Mix Model Dashboard",
+    page_icon="📈",
+    layout="wide"
+)
 
 # -----------------------------
 # Data Loading
 # -----------------------------
+@st.cache_data
 def load_data(file_obj=None):
     if file_obj is None:
+        # Generate dummy data
         np.random.seed(42)
         n = 52
         df = pd.DataFrame({
@@ -55,15 +63,16 @@ def load_data(file_obj=None):
             'Rainfall_Index': np.random.uniform(0, 1.5, n),
         })
         return df
-
+    
+    # Load from uploaded file
     if file_obj.name.endswith('.csv'):
         df = pd.read_csv(file_obj)
     else:
         df = pd.read_excel(file_obj)
-
+    
     if 'Week' in df.columns:
         df['Week'] = pd.to_datetime(df['Week'])
-
+    
     return df
 
 
@@ -78,26 +87,27 @@ def prepare_data(df, target):
     return X, y, features
 
 
+@st.cache_data
 def build_model(df, target):
     X, y, features = prepare_data(df, target)
     scaler = StandardScaler()
     Xs = scaler.fit_transform(X)
-
+    
     model = LinearRegression()
     model.fit(Xs, y)
-
+    
     y_pred = model.predict(Xs)
-
+    
     r2 = r2_score(y, y_pred)
     mae = mean_absolute_error(y, y_pred)
     mape = np.mean(np.abs((y - y_pred) / np.maximum(y, 1))) * 100
-
+    
     importance = pd.DataFrame({
         "Feature": features,
         "Coefficient": model.coef_,
         "Abs": np.abs(model.coef_)
     }).sort_values("Abs", ascending=False)
-
+    
     return model, scaler, importance, r2, mae, mape, y, y_pred
 
 
@@ -105,40 +115,46 @@ def build_model(df, target):
 # Visuals
 # -----------------------------
 def plot_importance(df):
-    return px.bar(
+    fig = px.bar(
         df.head(15),
         x="Abs",
         y="Feature",
         orientation="h",
         title="Top Feature Importance"
     )
+    fig.update_layout(height=500)
+    return fig
 
 
 def plot_actual_vs_pred(y, yhat):
     fig = go.Figure()
-    fig.add_trace(go.Scatter(y=y, mode="lines", name="Actual"))
+    fig.add_trace(go.Scatter(y=y.values, mode="lines", name="Actual"))
     fig.add_trace(go.Scatter(y=yhat, mode="lines", name="Predicted", line=dict(dash="dash")))
-    fig.update_layout(title="Actual vs Predicted Sales")
+    fig.update_layout(title="Actual vs Predicted Sales", height=400)
     return fig
 
 
 def plot_residuals(y, yhat):
-    res = y - yhat
-    return px.histogram(res, nbins=30, title="Residual Distribution")
+    res = y.values - yhat
+    fig = px.histogram(res, nbins=30, title="Residual Distribution")
+    fig.update_layout(height=400)
+    return fig
 
 
 def plot_contribution(df, model, scaler, features):
     X = df[features].fillna(0)
     Xs = scaler.transform(X)
     contrib = pd.DataFrame(Xs * model.coef_, columns=features).sum()
-
+    
     out = pd.DataFrame({
         "Channel": contrib.index,
         "Contribution": contrib.values
     }).sort_values("Contribution")
-
-    return px.bar(out, x="Contribution", y="Channel", orientation="h",
+    
+    fig = px.bar(out, x="Contribution", y="Channel", orientation="h",
                   title="Channel Contribution")
+    fig.update_layout(height=500)
+    return fig
 
 
 def plot_efficiency(df, contrib_df):
@@ -149,90 +165,128 @@ def plot_efficiency(df, contrib_df):
             cont = contrib_df[contrib_df["Channel"] == ch]["Contribution"].sum()
             if spend > 0:
                 data.append({"Channel": ch, "Efficiency_Index": cont / spend})
-
+    
     if not data:
-        return go.Figure().add_annotation(text="No efficiency data", showarrow=False)
-
+        fig = go.Figure()
+        fig.add_annotation(text="No efficiency data", showarrow=False)
+        return fig
+    
     ef = pd.DataFrame(data).sort_values("Efficiency_Index")
-    return px.bar(
+    fig = px.bar(
         ef, x="Efficiency_Index", y="Channel", orientation="h",
         title="Marketing Efficiency Index"
     )
+    fig.update_layout(height=400)
+    return fig
 
 
 # -----------------------------
-# Main Analysis
+# Main App
 # -----------------------------
-def analyze(file, brand, geo, target):
-    df = load_data(file)
-    full_df = df.copy()
-
-    if brand != "All":
-        df = df[df["Brand"] == brand]
-    if geo != "All":
-        df = df[df["Geo"] == geo]
-
-    if df.empty:
-        return "⚠️ No data after filtering", None, None, None, None, None, ["All"], ["All"]
-
-    model, scaler, imp, r2, mae, mape, y, yhat = build_model(df, target)
-
-    summary = f"""
-### 📊 Model Performance
-- **R²:** {r2:.3f}
-- **MAE:** ${mae:,.0f}
-- **MAPE:** {mape:.2f}%
-- **Total Sales:** ${df[target].sum():,.0f}
-"""
-
-    brands = ["All"] + sorted(full_df["Brand"].unique())
-    geos = ["All"] + sorted(full_df["Geo"].unique())
-
-    contrib_fig = plot_contribution(df, model, scaler, imp["Feature"].tolist())
-
-    return (
-        summary,
-        plot_importance(imp),
-        contrib_fig,
-        plot_actual_vs_pred(y, yhat),
-        plot_residuals(y, yhat),
-        plot_efficiency(df, pd.DataFrame({"Channel": imp["Feature"], "Contribution": imp["Coefficient"]})),
-        imp.head(20),
-        brands,
-        geos
-    )
-
-
-# -----------------------------
-# UI
-# -----------------------------
-with gr.Blocks(title="Marketing Mix Model Dashboard") as demo:
-    gr.Markdown("# 📈 Marketing Mix Model Dashboard")
-
-    with gr.Row():
-        file = gr.File(label="Upload CSV / Excel (optional)")
-        brand = gr.Dropdown(["All"], value="All", label="Brand")
-        geo = gr.Dropdown(["All"], value="All", label="Geo")
-        target = gr.Dropdown(["Sales_Value", "Sales_Units"], value="Sales_Value")
-
-    btn = gr.Button("🚀 Run Analysis")
-
-    summary = gr.Markdown()
-
-    with gr.Tabs():
-        imp_plot = gr.Plot(label="Feature Importance")
-        contrib_plot = gr.Plot(label="Contribution")
-        actual_plot = gr.Plot(label="Actual vs Predicted")
-        resid_plot = gr.Plot(label="Residuals")
-        eff_plot = gr.Plot(label="Efficiency Index")
-        imp_table = gr.Dataframe()
-
-    btn.click(
-        analyze,
-        [file, brand, geo, target],
-        [summary, imp_plot, contrib_plot, actual_plot, resid_plot, eff_plot, imp_table, brand, geo]
-    )
+def main():
+    st.title("📈 Marketing Mix Model Dashboard")
+    
+    # Sidebar
+    with st.sidebar:
+        st.header("Configuration")
+        
+        uploaded_file = st.file_uploader(
+            "Upload CSV / Excel (optional)", 
+            type=['csv', 'xlsx', 'xls']
+        )
+        
+        # Load data
+        if uploaded_file is not None:
+            df = load_data(uploaded_file)
+        else:
+            df = load_data()
+        
+        # Get unique values for filters
+        brands = ["All"] + sorted(df["Brand"].unique().tolist())
+        geos = ["All"] + sorted(df["Geo"].unique().tolist())
+        
+        brand = st.selectbox("Brand", brands, index=0)
+        geo = st.selectbox("Geo", geos, index=0)
+        target = st.selectbox("Target Variable", ["Sales_Value", "Sales_Units"], index=0)
+        
+        run_analysis = st.button("🚀 Run Analysis", type="primary")
+    
+    # Main content
+    if run_analysis or uploaded_file is not None:
+        # Filter data
+        filtered_df = df.copy()
+        
+        if brand != "All":
+            filtered_df = filtered_df[filtered_df["Brand"] == brand]
+        if geo != "All":
+            filtered_df = filtered_df[filtered_df["Geo"] == geo]
+        
+        if filtered_df.empty:
+            st.error("⚠️ No data after filtering")
+            return
+        
+        # Build model
+        with st.spinner("Building model..."):
+            model, scaler, imp, r2, mae, mape, y, yhat = build_model(filtered_df, target)
+        
+        # Display metrics
+        st.subheader("📊 Model Performance")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("R² Score", f"{r2:.3f}")
+        with col2:
+            st.metric("MAE", f"${mae:,.0f}")
+        with col3:
+            st.metric("MAPE", f"{mape:.2f}%")
+        with col4:
+            st.metric("Total Sales", f"${filtered_df[target].sum():,.0f}")
+        
+        # Tabs for different visualizations
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+            "Feature Importance", 
+            "Contribution", 
+            "Actual vs Predicted", 
+            "Residuals", 
+            "Efficiency Index",
+            "Data Table"
+        ])
+        
+        with tab1:
+            st.plotly_chart(plot_importance(imp), use_container_width=True)
+        
+        with tab2:
+            contrib_df = pd.DataFrame({
+                "Channel": imp["Feature"], 
+                "Contribution": imp["Coefficient"]
+            })
+            st.plotly_chart(plot_contribution(filtered_df, model, scaler, imp["Feature"].tolist()), 
+                          use_container_width=True)
+        
+        with tab3:
+            st.plotly_chart(plot_actual_vs_pred(y, yhat), use_container_width=True)
+        
+        with tab4:
+            st.plotly_chart(plot_residuals(y, yhat), use_container_width=True)
+        
+        with tab5:
+            st.plotly_chart(plot_efficiency(filtered_df, contrib_df), use_container_width=True)
+        
+        with tab6:
+            st.subheader("Top 20 Features by Importance")
+            st.dataframe(imp.head(20), use_container_width=True)
+    
+    else:
+        st.info("👈 Configure settings in the sidebar and click 'Run Analysis' to start")
+        
+        # Show data preview
+        st.subheader("Data Preview")
+        if uploaded_file is not None:
+            preview_df = load_data(uploaded_file)
+        else:
+            preview_df = load_data()
+        st.dataframe(preview_df.head(10), use_container_width=True)
 
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    main()
