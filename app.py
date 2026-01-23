@@ -192,7 +192,7 @@ def main():
 
         # Build model
         with st.spinner("Building model..."):
-            model, scaler, imp, r2, mae, mape, y, yhat = build_model(filtered_df, target)
+            model, scaler, imp, r2, mae, mape, y, yhat, features = build_model(filtered_df, target)
 
         # Display metrics
         st.subheader("📊 Model Performance")
