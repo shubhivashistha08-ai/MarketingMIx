@@ -8,7 +8,7 @@ from sklearn.preprocessing import StandardScaler
 
 
 # -----------------------------
-# Configuration
+# CONFIG
 # -----------------------------
 MEDIA_CHANNELS = [
     'TV_Impressions', 'YouTube_Impressions', 'Facebook_Impressions',
@@ -18,24 +18,34 @@ MEDIA_CHANNELS = [
 PROMO_CHANNELS = ['Feature_Flag', 'Display_Flag', 'TPR_Flag', 'Trade_Spend']
 PRICE_VARS = ['Net_Price']
 
+REGION_COORDS = {
+    "Central": (23.2599, 77.4126),
+    "East": (22.5726, 88.3639),
+    "Metro Delhi": (28.6139, 77.2090),
+    "Metro Mumbai": (19.0760, 72.8777),
+    "North": (30.7333, 76.7794),
+    "NorthEast": (26.1445, 91.7362),
+    "South": (12.9716, 77.5946),
+    "West": (23.0225, 72.5714)
+}
+
 st.set_page_config(
-    page_title="Executive Marketing Performance Dashboard",
-    page_icon="🌍",
+    page_title="India Marketing Performance Dashboard",
+    page_icon="🇮🇳",
     layout="wide"
 )
 
 
 # -----------------------------
-# Data
+# DATA
 # -----------------------------
 @st.cache_data
 def load_data():
-    df = pd.read_csv("synthetic_mmm_weekly_india.csv")
-    return df
+    return pd.read_csv("synthetic_mmm_weekly_india.csv")
 
 
 # -----------------------------
-# Model
+# MODEL
 # -----------------------------
 def build_model(df, target):
     features = MEDIA_CHANNELS + PROMO_CHANNELS + PRICE_VARS
@@ -60,55 +70,61 @@ def build_model(df, target):
 
 
 # -----------------------------
-# Visuals
+# VISUALS
 # -----------------------------
-def plot_geo_heatmap(df, target):
+def plot_india_heatmap(df, target):
     geo_sales = df.groupby("Geo")[target].sum().reset_index()
 
-    fig = px.choropleth(
+    geo_sales["lat"] = geo_sales["Geo"].map(lambda x: REGION_COORDS.get(x, (None, None))[0])
+    geo_sales["lon"] = geo_sales["Geo"].map(lambda x: REGION_COORDS.get(x, (None, None))[1])
+
+    fig = px.scatter_geo(
         geo_sales,
-        locations="Geo",
-        locationmode="country names",
+        lat="lat",
+        lon="lon",
+        size=target,
         color=target,
+        hover_name="Geo",
+        scope="asia",
+        projection="mercator",
+        title="Sales Intensity Across India Regions",
         color_continuous_scale="Blues",
-        title="Global Sales Distribution"
+        size_max=40
     )
-    fig.update_layout(height=450)
+
+    fig.update_geos(
+        center=dict(lat=22.5, lon=78.9),
+        lataxis_range=[5, 35],
+        lonaxis_range=[65, 95],
+        showland=True
+    )
+
+    fig.update_layout(height=500)
     return fig
 
 
-def compute_channel_contribution(df, model, scaler, features, target):
+def compute_contribution(df, model, scaler, features, target):
     X = df[features].fillna(0)
     Xs = scaler.transform(X)
 
-    raw_contribution = (Xs * model.coef_).sum(axis=0)
+    raw = (Xs * model.coef_).sum(axis=0)
+    total_sales = df[target].sum()
 
     contrib_df = pd.DataFrame({
         "Channel": features,
-        "Raw_Contribution": raw_contribution
-    })
+        "Sales Contribution": (raw / raw.sum()) * total_sales
+    }).sort_values("Sales Contribution", ascending=False)
 
-    total_sales = df[target].sum()
-
-    contrib_df["Sales_Contribution"] = (
-        contrib_df["Raw_Contribution"] /
-        contrib_df["Raw_Contribution"].sum()
-    ) * total_sales
-
-    contrib_df["Share_%"] = (
-        contrib_df["Sales_Contribution"] / total_sales * 100
-    )
-
-    return contrib_df.sort_values("Sales_Contribution", ascending=False)
+    return contrib_df
 
 
-def plot_channel_contribution(contrib_df):
+def plot_contribution(contrib_df):
     fig = px.bar(
         contrib_df,
-        x="Sales_Contribution",
+        x="Sales Contribution",
         y="Channel",
         orientation="h",
-        title="How Much Sales Each Channel Contributes"
+        title="How Much Sales Each Channel Generates"
     )
     fig.update_layout(height=450)
     return fig
@@ -121,7 +137,7 @@ def plot_efficiency(df, contrib_df):
         if ch in df.columns and ch in contrib_df["Channel"].values:
             activity = df[ch].sum()
             sales = contrib_df.loc[
-                contrib_df["Channel"] == ch, "Sales_Contribution"
+                contrib_df["Channel"] == ch, "Sales Contribution"
             ].values[0]
 
             if activity > 0:
@@ -145,17 +161,16 @@ def plot_efficiency(df, contrib_df):
 
 
 # -----------------------------
-# App
+# APP
 # -----------------------------
 def main():
-    st.title("🌍 Executive Marketing Performance Dashboard")
-    st.caption("A business-first view of where sales come from and what drives them")
+    st.title("🇮🇳 India Marketing Performance Dashboard")
+    st.caption("Business-friendly view of regional sales performance and marketing impact")
 
     df = load_data()
 
     with st.sidebar:
         brand = st.selectbox("Brand", ["All"] + sorted(df["Brand"].unique()), index=0)
-        geo = st.selectbox("Geo", ["All"] + sorted(df["Geo"].unique()), index=0)
         target = st.selectbox("Sales Metric", ["Sales_Units", "Sales_Value"], index=0)
         run = st.button("View Dashboard", type="primary")
 
@@ -164,27 +179,17 @@ def main():
 
     if brand != "All":
         df = df[df["Brand"] == brand]
-    if geo != "All":
-        df = df[df["Geo"] == geo]
 
     model, scaler, imp, features = build_model(df, target)
 
     # -----------------------------
-    # GEO HEATMAP
-    # -----------------------------
-    st.plotly_chart(
-        plot_geo_heatmap(df, target),
-        use_container_width=True
-    )
-
-    # -----------------------------
-    # KPI CARDS (2 x 2)
+    # KPI CARDS
     # -----------------------------
     total_sales_m = df[target].sum() / 1_000_000
     avg_price = df["Net_Price"].mean()
     top_driver = imp.iloc[0]["Driver"]
 
-    contrib_df = compute_channel_contribution(df, model, scaler, features, target)
+    contrib_df = compute_contribution(df, model, scaler, features, target)
     eff_fig, eff_df = plot_efficiency(df, contrib_df)
     best_channel = eff_df.iloc[-1]["Channel"]
 
@@ -199,12 +204,22 @@ def main():
     st.divider()
 
     # -----------------------------
-    # BUSINESS DRIVERS (TEXT FIRST)
+    # INDIA HEATMAP (MIDDLE)
+    # -----------------------------
+    st.plotly_chart(
+        plot_india_heatmap(df, target),
+        use_container_width=True
+    )
+
+    st.divider()
+
+    # -----------------------------
+    # BUSINESS DRIVERS
     # -----------------------------
     st.subheader("📌 What Is Driving Sales?")
     for _, row in imp.head(5).iterrows():
-        direction = "increases" if row["Impact"] > 0 else "reduces"
-        st.write(f"• **{row['Driver']}** strongly {direction} sales")
+        effect = "increases" if row["Impact"] > 0 else "reduces"
+        st.write(f"• **{row['Driver']}** strongly {effect} sales")
 
     st.divider()
 
@@ -213,11 +228,9 @@ def main():
     # -----------------------------
     st.subheader("📊 Channel Contribution to Total Sales")
     st.plotly_chart(
-        plot_channel_contribution(contrib_df),
+        plot_contribution(contrib_df),
         use_container_width=True
     )
-
-    st.caption("This chart shows how much sales each channel contributes in absolute terms.")
 
     st.divider()
 
@@ -226,9 +239,7 @@ def main():
     # -----------------------------
     st.subheader("⚡ Marketing Efficiency")
     st.plotly_chart(eff_fig, use_container_width=True)
-    st.caption(
-        "Higher bars indicate channels that generate more sales per unit of activity."
-    )
+    st.caption("Channels on the right generate more sales per unit of marketing activity.")
 
 
 if __name__ == "__main__":
