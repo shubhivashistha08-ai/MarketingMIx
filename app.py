@@ -61,10 +61,6 @@ def build_model(df, target):
 # BUSINESS LOGIC
 # -----------------------------
 def compute_positive_contribution(df, model, scaler, features, target):
-    """
-    Converts model output into positive, business-friendly
-    sales attribution that sums to total sales.
-    """
     X = df[features].fillna(0)
     Xs = scaler.transform(X)
 
@@ -81,6 +77,7 @@ def compute_positive_contribution(df, model, scaler, features, target):
 
 def compute_efficiency(df, contrib_df):
     rows = []
+
     for ch in MEDIA_CHANNELS:
         if ch in df.columns and ch in contrib_df["Channel"].values:
             activity = df[ch].sum()
@@ -137,22 +134,6 @@ def main():
     c2.metric("Average Net Price", f"{avg_price:.2f}", help="Average selling price per unit")
     c3.metric("Top Sales Driver", top_driver)
     c4.metric("Most Efficient Channel", best_channel)
-
-    st.divider()
-
-    # -----------------------------
-    # WHAT IS DRIVING SALES (CARDS)
-    # -----------------------------
-    st.subheader("What Is Driving Sales?")
-
-    cards = st.columns(4)
-    for i, (_, row) in enumerate(imp.head(4).iterrows()):
-        strength = "Strong Impact" if row["AbsImpact"] > imp["AbsImpact"].median() else "Moderate Impact"
-        cards[i].metric(
-            row["Driver"],
-            strength,
-            help="This driver has a significant influence on sales movement"
-        )
 
     st.divider()
 
