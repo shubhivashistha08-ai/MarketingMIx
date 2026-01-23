@@ -73,7 +73,7 @@ def build_model(df, target):
         "Abs": np.abs(model.coef_)
     }).sort_values("Abs", ascending=False)
 
-    return model, scaler, importance, r2, mae, mape, y, y_pred
+    return model, scaler, importance, r2, mae, mape, y, y_pred, features
 
 
 # -----------------------------
