@@ -31,48 +31,13 @@ st.set_page_config(
 # Data Loading
 # -----------------------------
 @st.cache_data
-def load_data(file_obj=None):
-    if file_obj is None:
-        # Generate dummy data
-        np.random.seed(42)
-        n = 52
-        df = pd.DataFrame({
-            'Week': pd.date_range('2023-01-01', periods=n, freq='W'),
-            'Brand': np.random.choice(['Brand_A', 'Brand_B'], n),
-            'Geo': np.random.choice(['North', 'South', 'East', 'West'], n),
-            'SKU': np.random.choice(['SKU_1', 'SKU_2', 'SKU_3'], n),
-            'Sales_Value': np.random.uniform(50000, 150000, n),
-            'Sales_Units': np.random.uniform(1000, 5000, n),
-            'TV_Impressions': np.random.uniform(0, 100000, n),
-            'YouTube_Impressions': np.random.uniform(0, 50000, n),
-            'Facebook_Impressions': np.random.uniform(0, 80000, n),
-            'Instagram_Impressions': np.random.uniform(0, 60000, n),
-            'Print_Readership': np.random.uniform(0, 30000, n),
-            'Radio_Listenership': np.random.uniform(0, 40000, n),
-            'Feature_Flag': np.random.randint(0, 2, n),
-            'Display_Flag': np.random.randint(0, 2, n),
-            'TPR_Flag': np.random.randint(0, 2, n),
-            'Trade_Spend': np.random.uniform(0, 10000, n),
-            'Weighted_Distribution': np.random.uniform(50, 100, n),
-            'Numeric_Distribution': np.random.uniform(40, 90, n),
-            'TDP': np.random.uniform(30, 80, n),
-            'Net_Price': np.random.uniform(80, 120, n),
-            'CPI': np.random.uniform(95, 105, n),
-            'GDP_Growth': np.random.uniform(2, 4, n),
-            'Festival_Index': np.random.uniform(0, 2, n),
-            'Rainfall_Index': np.random.uniform(0, 1.5, n),
-        })
-        return df
-    
-    # Load from uploaded file
-    if file_obj.name.endswith('.csv'):
-        df = pd.read_csv(file_obj)
-    else:
-        df = pd.read_excel(file_obj)
-    
+def load_data():
+    # Always read the CSV bundled in the repo
+    df = pd.read_csv("synthetic_mmm_weekly_india.csv")
+
     if 'Week' in df.columns:
         df['Week'] = pd.to_datetime(df['Week'])
-    
+
     return df
 
 
@@ -92,22 +57,22 @@ def build_model(df, target):
     X, y, features = prepare_data(df, target)
     scaler = StandardScaler()
     Xs = scaler.fit_transform(X)
-    
+
     model = LinearRegression()
     model.fit(Xs, y)
-    
+
     y_pred = model.predict(Xs)
-    
+
     r2 = r2_score(y, y_pred)
     mae = mean_absolute_error(y, y_pred)
     mape = np.mean(np.abs((y - y_pred) / np.maximum(y, 1))) * 100
-    
+
     importance = pd.DataFrame({
         "Feature": features,
         "Coefficient": model.coef_,
         "Abs": np.abs(model.coef_)
     }).sort_values("Abs", ascending=False)
-    
+
     return model, scaler, importance, r2, mae, mape, y, y_pred
 
 
@@ -145,14 +110,19 @@ def plot_contribution(df, model, scaler, features):
     X = df[features].fillna(0)
     Xs = scaler.transform(X)
     contrib = pd.DataFrame(Xs * model.coef_, columns=features).sum()
-    
+
     out = pd.DataFrame({
         "Channel": contrib.index,
         "Contribution": contrib.values
     }).sort_values("Contribution")
-    
-    fig = px.bar(out, x="Contribution", y="Channel", orientation="h",
-                  title="Channel Contribution")
+
+    fig = px.bar(
+        out,
+        x="Contribution",
+        y="Channel",
+        orientation="h",
+        title="Channel Contribution"
+    )
     fig.update_layout(height=500)
     return fig
 
@@ -165,15 +135,18 @@ def plot_efficiency(df, contrib_df):
             cont = contrib_df[contrib_df["Channel"] == ch]["Contribution"].sum()
             if spend > 0:
                 data.append({"Channel": ch, "Efficiency_Index": cont / spend})
-    
+
     if not data:
         fig = go.Figure()
         fig.add_annotation(text="No efficiency data", showarrow=False)
         return fig
-    
+
     ef = pd.DataFrame(data).sort_values("Efficiency_Index")
     fig = px.bar(
-        ef, x="Efficiency_Index", y="Channel", orientation="h",
+        ef,
+        x="Efficiency_Index",
+        y="Channel",
+        orientation="h",
         title="Marketing Efficiency Index"
     )
     fig.update_layout(height=400)
@@ -185,54 +158,46 @@ def plot_efficiency(df, contrib_df):
 # -----------------------------
 def main():
     st.title("📈 Marketing Mix Model Dashboard")
-    
+
     # Sidebar
     with st.sidebar:
         st.header("Configuration")
-        
-        uploaded_file = st.file_uploader(
-            "Upload CSV / Excel (optional)", 
-            type=['csv', 'xlsx', 'xls']
-        )
-        
-        # Load data
-        if uploaded_file is not None:
-            df = load_data(uploaded_file)
-        else:
-            df = load_data()
-        
+
+        # Load data from fixed CSV
+        df = load_data()
+
         # Get unique values for filters
         brands = ["All"] + sorted(df["Brand"].unique().tolist())
         geos = ["All"] + sorted(df["Geo"].unique().tolist())
-        
+
         brand = st.selectbox("Brand", brands, index=0)
         geo = st.selectbox("Geo", geos, index=0)
         target = st.selectbox("Target Variable", ["Sales_Value", "Sales_Units"], index=0)
-        
+
         run_analysis = st.button("🚀 Run Analysis", type="primary")
-    
+
     # Main content
-    if run_analysis or uploaded_file is not None:
+    if run_analysis:
         # Filter data
         filtered_df = df.copy()
-        
+
         if brand != "All":
             filtered_df = filtered_df[filtered_df["Brand"] == brand]
         if geo != "All":
             filtered_df = filtered_df[filtered_df["Geo"] == geo]
-        
+
         if filtered_df.empty:
             st.error("⚠️ No data after filtering")
             return
-        
+
         # Build model
         with st.spinner("Building model..."):
             model, scaler, imp, r2, mae, mape, y, yhat = build_model(filtered_df, target)
-        
+
         # Display metrics
         st.subheader("📊 Model Performance")
         col1, col2, col3, col4 = st.columns(4)
-        
+
         with col1:
             st.metric("R² Score", f"{r2:.3f}")
         with col2:
@@ -241,50 +206,49 @@ def main():
             st.metric("MAPE", f"{mape:.2f}%")
         with col4:
             st.metric("Total Sales", f"${filtered_df[target].sum():,.0f}")
-        
+
         # Tabs for different visualizations
         tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-            "Feature Importance", 
-            "Contribution", 
-            "Actual vs Predicted", 
-            "Residuals", 
+            "Feature Importance",
+            "Contribution",
+            "Actual vs Predicted",
+            "Residuals",
             "Efficiency Index",
             "Data Table"
         ])
-        
+
         with tab1:
             st.plotly_chart(plot_importance(imp), use_container_width=True)
-        
+
         with tab2:
             contrib_df = pd.DataFrame({
-                "Channel": imp["Feature"], 
+                "Channel": imp["Feature"],
                 "Contribution": imp["Coefficient"]
             })
-            st.plotly_chart(plot_contribution(filtered_df, model, scaler, imp["Feature"].tolist()), 
-                          use_container_width=True)
-        
+            st.plotly_chart(
+                plot_contribution(filtered_df, model, scaler, imp["Feature"].tolist()),
+                use_container_width=True
+            )
+
         with tab3:
             st.plotly_chart(plot_actual_vs_pred(y, yhat), use_container_width=True)
-        
+
         with tab4:
             st.plotly_chart(plot_residuals(y, yhat), use_container_width=True)
-        
+
         with tab5:
             st.plotly_chart(plot_efficiency(filtered_df, contrib_df), use_container_width=True)
-        
+
         with tab6:
             st.subheader("Top 20 Features by Importance")
             st.dataframe(imp.head(20), use_container_width=True)
-    
+
     else:
         st.info("👈 Configure settings in the sidebar and click 'Run Analysis' to start")
-        
+
         # Show data preview
         st.subheader("Data Preview")
-        if uploaded_file is not None:
-            preview_df = load_data(uploaded_file)
-        else:
-            preview_df = load_data()
+        preview_df = load_data()
         st.dataframe(preview_df.head(10), use_container_width=True)
 
 
