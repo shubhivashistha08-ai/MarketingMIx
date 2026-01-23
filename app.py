@@ -1,12 +1,10 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
 import plotly.express as px
 
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import r2_score, mean_absolute_error
 
 
 # -----------------------------
@@ -19,13 +17,13 @@ MEDIA_CHANNELS = [
 
 PROMO_CHANNELS = ['Feature_Flag', 'Display_Flag', 'TPR_Flag', 'Trade_Spend']
 DISTRIBUTION_VARS = ['Weighted_Distribution', 'Numeric_Distribution', 'TDP']
-PRICE_VARS = ['Net_Price', 'CPI']
+PRICE_VARS = ['Net_Price']
 EXTERNAL_VARS = ['GDP_Growth', 'Festival_Index', 'Rainfall_Index']
 
 
 st.set_page_config(
-    page_title="Marketing Mix Model Dashboard",
-    page_icon="📈",
+    page_title="Business Marketing Performance Dashboard",
+    page_icon="📊",
     layout="wide"
 )
 
@@ -72,48 +70,27 @@ def build_model(df, target):
     model = LinearRegression()
     model.fit(Xs, y)
 
-    y_pred = model.predict(Xs)
-
-    r2 = r2_score(y, y_pred)
-    mae = mean_absolute_error(y, y_pred)
-    mape = np.mean(np.abs((y - y_pred) / np.maximum(y, 1))) * 100
-
     importance = pd.DataFrame({
-        "Feature": features,
-        "Coefficient": model.coef_,
+        "Driver": features,
+        "Impact": model.coef_,
         "Abs": np.abs(model.coef_)
     }).sort_values("Abs", ascending=False)
 
-    return model, scaler, importance, r2, mae, mape, y, y_pred, features
+    return model, scaler, importance, features
 
 
 # -----------------------------
-# Visuals
+# Business Visuals
 # -----------------------------
-def plot_importance(df):
+def plot_business_drivers(imp_df):
     fig = px.bar(
-        df.head(15),
+        imp_df.head(12),
         x="Abs",
-        y="Feature",
+        y="Driver",
         orientation="h",
-        title="Top Feature Importance"
+        title="Key Business Drivers of Sales"
     )
     fig.update_layout(height=500)
-    return fig
-
-
-def plot_actual_vs_pred(y, yhat):
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(y=y.values, mode="lines", name="Actual"))
-    fig.add_trace(go.Scatter(y=yhat, mode="lines", name="Predicted", line=dict(dash="dash")))
-    fig.update_layout(title="Actual vs Predicted Sales", height=400)
-    return fig
-
-
-def plot_residuals(y, yhat):
-    residuals = y.values - yhat
-    fig = px.histogram(residuals, nbins=30, title="Residual Distribution")
-    fig.update_layout(height=400)
     return fig
 
 
@@ -133,7 +110,7 @@ def plot_contribution(df, model, scaler, features):
         x="Contribution",
         y="Channel",
         orientation="h",
-        title="Channel Contribution"
+        title="Sales Contribution by Channel & Levers"
     )
     fig.update_layout(height=500)
 
@@ -156,11 +133,6 @@ def plot_efficiency(df, contrib_df):
                     "Efficiency_Index": cont / spend
                 })
 
-    if not data:
-        fig = go.Figure()
-        fig.add_annotation(text="No efficiency data available", showarrow=False)
-        return fig
-
     ef = pd.DataFrame(data).sort_values("Efficiency_Index")
 
     fig = px.bar(
@@ -168,101 +140,119 @@ def plot_efficiency(df, contrib_df):
         x="Efficiency_Index",
         y="Channel",
         orientation="h",
-        title="Marketing Efficiency Index"
+        title="Marketing Efficiency Index (Higher = Better)"
     )
     fig.update_layout(height=400)
-    return fig
+    return fig, ef
 
 
 # -----------------------------
 # Main App
 # -----------------------------
 def main():
-    st.title("📈 Marketing Mix Model Dashboard")
+    st.title("📊 Business Marketing Performance Dashboard")
+    st.caption("A simple, business-first view of what drives your sales")
 
     with st.sidebar:
-        st.header("Configuration")
+        st.header("View Settings")
 
         df = load_data()
 
         brands = ["All"] + sorted(df["Brand"].unique().tolist())
         geos = ["All"] + sorted(df["Geo"].unique().tolist())
 
-        brand = st.selectbox("Brand", brands)
-        geo = st.selectbox("Geo", geos)
-        target = st.selectbox("Target Variable", ["Sales_Value", "Sales_Units"])
+        brand = st.selectbox("Brand", brands, index=0)
+        geo = st.selectbox("Geo", geos, index=0)
 
-        run_analysis = st.button("🚀 Run Analysis", type="primary")
+        target = st.selectbox(
+            "Sales Metric",
+            ["Sales_Units", "Sales_Value"],
+            index=0
+        )
 
-    if run_analysis:
-        filtered_df = df.copy()
+        run_analysis = st.button("🚀 View Dashboard", type="primary")
 
-        if brand != "All":
-            filtered_df = filtered_df[filtered_df["Brand"] == brand]
-        if geo != "All":
-            filtered_df = filtered_df[filtered_df["Geo"] == geo]
+    if not run_analysis:
+        st.info("👈 Select filters and click **View Dashboard**")
+        return
 
-        if filtered_df.empty:
-            st.error("⚠️ No data after filtering")
-            return
+    # Filter data
+    filtered_df = df.copy()
 
-        with st.spinner("Building model..."):
-            model, scaler, imp, r2, mae, mape, y, yhat, features = build_model(
-                filtered_df, target
-            )
+    if brand != "All":
+        filtered_df = filtered_df[filtered_df["Brand"] == brand]
+    if geo != "All":
+        filtered_df = filtered_df[filtered_df["Geo"] == geo]
 
-        st.subheader("📊 Model Performance")
-        c1, c2, c3, c4 = st.columns(4)
+    # Build model
+    model, scaler, imp, features = build_model(filtered_df, target)
 
-        c1.metric("R²", f"{r2:.3f}")
-        c2.metric("MAE", f"{mae:,.0f}")
-        c3.metric("MAPE", f"{mape:.2f}%")
-        c4.metric("Total Sales", f"{filtered_df[target].sum():,.0f}")
+    # -----------------------------
+    # Business KPIs
+    # -----------------------------
+    total_sales = filtered_df[target].sum()
+    total_sales_m = total_sales / 1_000_000
 
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-            "Feature Importance",
-            "Contribution",
-            "Actual vs Predicted",
-            "Residuals",
-            "Efficiency Index",
-            "Data Table"
-        ])
+    avg_price = filtered_df["Net_Price"].mean() if "Net_Price" in filtered_df else 0
 
-        with tab1:
-            st.plotly_chart(plot_importance(imp), use_container_width=True)
+    top_driver = imp.iloc[0]["Driver"]
 
-        with tab2:
-            fig, contrib_df = plot_contribution(
-                filtered_df, model, scaler, features
-            )
-            st.plotly_chart(fig, use_container_width=True)
+    fig_contrib, contrib_df = plot_contribution(
+        filtered_df, model, scaler, features
+    )
 
-        with tab3:
-            st.plotly_chart(
-                plot_actual_vs_pred(y, yhat),
-                use_container_width=True
-            )
+    _, eff_df = plot_efficiency(filtered_df, contrib_df)
+    top_eff_channel = eff_df.iloc[-1]["Channel"] if not eff_df.empty else "N/A"
 
-        with tab4:
-            st.plotly_chart(
-                plot_residuals(y, yhat),
-                use_container_width=True
-            )
+    col1, col2, col3, col4 = st.columns(4)
 
-        with tab5:
-            st.plotly_chart(
-                plot_efficiency(filtered_df, contrib_df),
-                use_container_width=True
-            )
+    col1.metric(
+        "Total Sales",
+        f"{total_sales_m:.2f} M",
+        help="Total sales across selected brand & geography"
+    )
 
-        with tab6:
-            st.subheader("Top 20 Features")
-            st.dataframe(imp.head(20), use_container_width=True)
+    col2.metric(
+        "Average Net Price",
+        f"{avg_price:.2f}",
+        help="Average selling price"
+    )
 
-    else:
-        st.info("👈 Configure filters and click **Run Analysis**")
-        st.subheader("Data Preview")
-        st.dataframe(load_data().head(10), use_container_width=True)
+    col3.metric(
+        "Top Sales Driver",
+        top_driver,
+        help="Strongest driver impacting sales"
+    )
+
+    col4.metric(
+        "Most Efficient Channel",
+        top_eff_channel,
+        help="Channel generating highest sales per unit of activity"
+    )
+
+    # -----------------------------
+    # Tabs
+    # -----------------------------
+    tab1, tab2, tab3 = st.tabs([
+        "Business Drivers",
+        "Channel Contribution",
+        "Marketing Efficiency"
+    ])
+
+    with tab1:
+        st.plotly_chart(
+            plot_business_drivers(imp),
+            use_container_width=True
+        )
+
+    with tab2:
+        st.plotly_chart(fig_contrib, use_container_width=True)
+
+    with tab3:
+        st.plotly_chart(
+            plot_efficiency(filtered_df, contrib_df)[0],
+            use_container_width=True
+        )
 
 
 if __name__ == "__main__":
