@@ -104,6 +104,12 @@ def main():
     df = load_data()
 
     # -----------------------------
+    # WEEK → YEAR (CORRECT FIX)
+    # -----------------------------
+    df["Week"] = pd.to_datetime(df["Week"])
+    df["Year"] = df["Week"].dt.year
+
+    # -----------------------------
     # SIDEBAR
     # -----------------------------
     with st.sidebar:
@@ -134,6 +140,7 @@ def main():
     avg_price = df["Net_Price"].mean()
 
     yearly = df.groupby("Year")[target].sum().reset_index()
+
     yoy_growth = (
         (yearly.iloc[-1][target] / yearly.iloc[-2][target]) - 1
     ) * 100 if len(yearly) > 1 else 0
