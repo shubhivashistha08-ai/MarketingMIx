@@ -104,10 +104,13 @@ def main():
     df = load_data()
 
     # -----------------------------
-    # WEEK → YEAR (CORRECT FIX)
+    # WEEK → YEAR & QUARTER
     # -----------------------------
     df["Week"] = pd.to_datetime(df["Week"])
     df["Year"] = df["Week"].dt.year
+    df["Quarter"] = df["Week"].dt.quarter
+    df["YearQuarter"] = df["Year"].astype(str) + "-Q" + df["Quarter"].astype(str)
+    df["Month"] = df["Week"].dt.to_period('M').astype(str)
 
     # -----------------------------
     # SIDEBAR
@@ -156,25 +159,76 @@ def main():
     st.divider()
 
     # =============================
-    # CHANNEL CONTRIBUTION
+    # TIME-BASED TRENDS (MOVED TO TOP)
     # =============================
-    st.subheader("Sales Contribution by Channel")
+    st.subheader("📈 Sales Performance Over Time")
 
-    fig_contrib = px.bar(
-        contrib_df,
-        x="Sales Contribution",
-        y="Channel",
-        orientation="h"
-    )
-    st.plotly_chart(fig_contrib, use_container_width=True)
+    # Create tabs for different time views
+    tab1, tab2, tab3 = st.tabs(["Quarterly Trend", "Monthly Trend", "Yearly Trend"])
+    
+    with tab1:
+        quarterly = df.groupby("YearQuarter")[target].sum().reset_index()
+        fig_quarter = px.line(
+            quarterly,
+            x="YearQuarter",
+            y=target,
+            markers=True,
+            title="Quarter-wise Sales Performance"
+        )
+        fig_quarter.update_layout(xaxis_title="Quarter", yaxis_title="Sales")
+        st.plotly_chart(fig_quarter, use_container_width=True)
+    
+    with tab2:
+        monthly = df.groupby("Month")[target].sum().reset_index()
+        fig_month = px.bar(
+            monthly,
+            x="Month",
+            y=target,
+            title="Month-wise Sales Performance"
+        )
+        fig_month.update_layout(xaxis_title="Month", yaxis_title="Sales")
+        st.plotly_chart(fig_month, use_container_width=True)
+    
+    with tab3:
+        fig_year = px.line(
+            yearly,
+            x="Year",
+            y=target,
+            markers=True,
+            title="Year-wise Sales Trend"
+        )
+        fig_year.update_layout(xaxis_title="Year", yaxis_title="Sales")
+        st.plotly_chart(fig_year, use_container_width=True)
 
-    fig_share = px.pie(
-        contrib_df,
-        names="Channel",
-        values="% Contribution",
-        hole=0.5
-    )
-    st.plotly_chart(fig_share, use_container_width=True)
+    st.divider()
+
+    # =============================
+    # CHANNEL CONTRIBUTION (SIDE BY SIDE)
+    # =============================
+    st.subheader("📊 Channel Performance Analysis")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("#### Absolute Sales Contribution")
+        fig_contrib = px.bar(
+            contrib_df,
+            x="Sales Contribution",
+            y="Channel",
+            orientation="h"
+        )
+        fig_contrib.update_layout(showlegend=False)
+        st.plotly_chart(fig_contrib, use_container_width=True)
+
+    with col2:
+        st.markdown("#### Percentage Distribution")
+        fig_share = px.pie(
+            contrib_df,
+            names="Channel",
+            values="% Contribution",
+            hole=0.5
+        )
+        st.plotly_chart(fig_share, use_container_width=True)
 
     st.success(
         f"🏆 **Top Performing Channel:** {top_channel} contributes the highest share of total sales."
@@ -183,25 +237,18 @@ def main():
     st.divider()
 
     # =============================
-    # MARKETING MIX INTELLIGENCE
+    # MARKETING EFFICIENCY
     # =============================
-    st.subheader("Marketing Spend vs Sales Impact")
-
-    fig_scatter = px.scatter(
-        eff_df,
-        x="Spend",
-        y="Sales Impact",
-        size="Sales Impact",
-        color="Channel",
-        title="Low Spend / High Return & High Spend / High Impact Channels"
-    )
-    st.plotly_chart(fig_scatter, use_container_width=True)
+    st.subheader("💡 Marketing Efficiency Insights")
 
     fig_eff = px.bar(
         eff_df.sort_values("Sales per 1K Impressions", ascending=False),
         x="Sales per 1K Impressions",
         y="Channel",
-        orientation="h"
+        orientation="h",
+        title="Sales Generated per 1,000 Impressions (Efficiency Metric)",
+        color="Sales per 1K Impressions",
+        color_continuous_scale="Blues"
     )
     st.plotly_chart(fig_eff, use_container_width=True)
 
@@ -210,25 +257,15 @@ def main():
     ).iloc[0]["Channel"]
 
     st.info(
-        f"💡 **Efficiency Insight:** {best_eff} delivers the highest sales per 1,000 impressions."
+        f"💡 **Efficiency Insight:** {best_eff} delivers the highest sales per 1,000 impressions, making it the most cost-effective channel."
     )
 
     st.divider()
 
     # =============================
-    # TIME & PROMOTION IMPACT
+    # PROMOTION IMPACT
     # =============================
-    st.subheader("Year-wise Sales Trend")
-
-    fig_trend = px.line(
-        yearly,
-        x="Year",
-        y=target,
-        markers=True
-    )
-    st.plotly_chart(fig_trend, use_container_width=True)
-
-    st.subheader("Sales Lift During Promotions")
+    st.subheader("🎯 Promotional Impact on Sales")
 
     promo_df = df.copy()
     promo_df["Promo"] = np.where(
@@ -242,15 +279,23 @@ def main():
     fig_promo = px.bar(
         promo_summary,
         x="Promo",
-        y=target
+        y=target,
+        title="Sales Lift During Promotional Periods",
+        color="Promo",
+        color_discrete_map={"Promotion": "#1f77b4", "No Promotion": "#aec7e8"}
     )
     st.plotly_chart(fig_promo, use_container_width=True)
 
-    if promo_summary.loc[promo_summary["Promo"] == "Promotion", target].values[0] > \
-       promo_summary.loc[promo_summary["Promo"] == "No Promotion", target].values[0]:
-        st.success("📈 Promotions drive higher sales compared to non-promotion periods.")
-    else:
-        st.warning("⚠️ Promotions do not significantly outperform non-promotion periods.")
+    if len(promo_summary) > 1:
+        promo_sales = promo_summary.loc[promo_summary["Promo"] == "Promotion", target].values
+        no_promo_sales = promo_summary.loc[promo_summary["Promo"] == "No Promotion", target].values
+        
+        if len(promo_sales) > 0 and len(no_promo_sales) > 0:
+            if promo_sales[0] > no_promo_sales[0]:
+                lift = ((promo_sales[0] / no_promo_sales[0]) - 1) * 100
+                st.success(f"📈 Promotions drive **{lift:.1f}% higher sales** compared to non-promotion periods.")
+            else:
+                st.warning("⚠️ Promotions do not significantly outperform non-promotion periods.")
 
 # =============================
 # RUN APP
